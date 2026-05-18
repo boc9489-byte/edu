@@ -3,53 +3,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Callable
 
-from .patterns import (
-    INTENT_CAMPUS_ENROLLMENT_RANK,
-    INTENT_LAST_30_DAYS_INCOME,
-    INTENT_LAST_3_MONTH_COMPLETION_RATE,
-    INTENT_MONTHLY_ENROLLMENT_COUNT,
-    INTENT_MONTHLY_REFUND_AMOUNT,
-    INTENT_SERIES_REFUND_AMOUNT_RANK,
-)
+from .time_range_parser import TimeRange
 
 DEFAULT_RANK_LIMIT = 10
 
 
 @dataclass(frozen=True)
 class SQLTemplate:
-    intent: str
+    template_key: str
     sql: str
-    params_factory: Callable[[datetime], tuple[Any, ...]]
+    params_factory: Callable[[TimeRange], tuple[Any, ...]]
     answer_factory: Callable[[list[dict[str, Any]]], str]
 
 
-def get_template(intent: str) -> SQLTemplate:
-    return SQL_TEMPLATES[intent]
+def get_sql_template(template_key: str) -> SQLTemplate | None:
+    return SQL_TEMPLATES.get(template_key)
 
 
-def _month_range(now: datetime) -> tuple[datetime, datetime]:
-    start = datetime(now.year, now.month, 1)
-    return start, _add_months(start, 1)
-
-
-def _last_30_days_range(now: datetime) -> tuple[datetime, datetime]:
-    return now - timedelta(days=30), now
-
-
-def _last_3_months_range(now: datetime) -> tuple[datetime, datetime]:
-    this_month = datetime(now.year, now.month, 1)
-    return _add_months(this_month, -2), _add_months(this_month, 1)
-
-
-def _add_months(value: datetime, months: int) -> datetime:
-    month_index = value.month - 1 + months
-    year = value.year + month_index // 12
-    month = month_index % 12 + 1
-    return value.replace(year=year, month=month)
+def _range_params(time_range: TimeRange) -> tuple[Any, ...]:
+    if time_range.start is None or time_range.end is None:
+        return ()
+    return time_range.start, time_range.end
 
 
 def _as_decimal(value: Any) -> Decimal:
@@ -97,8 +74,8 @@ def _answer_completion_rate(rows: list[dict[str, Any]]) -> str:
 
 
 SQL_TEMPLATES: dict[str, SQLTemplate] = {
-    INTENT_MONTHLY_ENROLLMENT_COUNT: SQLTemplate(
-        intent=INTENT_MONTHLY_ENROLLMENT_COUNT,
+    "monthly_enrollment_count": SQLTemplate(
+        template_key="monthly_enrollment_count",
         sql="""
             SELECT COUNT(DISTINCT student_id) AS enrollment_count
             FROM student_cohort_rel
@@ -107,11 +84,11 @@ SQL_TEMPLATES: dict[str, SQLTemplate] = {
               AND enroll_at < %s
             LIMIT 1
         """,
-        params_factory=_month_range,
+        params_factory=_range_params,
         answer_factory=_answer_monthly_enrollment,
     ),
-    INTENT_LAST_30_DAYS_INCOME: SQLTemplate(
-        intent=INTENT_LAST_30_DAYS_INCOME,
+    "last_30_days_income": SQLTemplate(
+        template_key="last_30_days_income",
         sql="""
             SELECT DATE(paid_at) AS stat_date,
                    COALESCE(SUM(amount), 0) AS paid_amount
@@ -123,11 +100,11 @@ SQL_TEMPLATES: dict[str, SQLTemplate] = {
             ORDER BY stat_date ASC
             LIMIT 30
         """,
-        params_factory=_last_30_days_range,
+        params_factory=_range_params,
         answer_factory=_answer_last_30_days_income,
     ),
-    INTENT_MONTHLY_REFUND_AMOUNT: SQLTemplate(
-        intent=INTENT_MONTHLY_REFUND_AMOUNT,
+    "monthly_refund_amount": SQLTemplate(
+        template_key="monthly_refund_amount",
         sql="""
             SELECT COALESCE(SUM(approved_amount), 0) AS refund_amount
             FROM refund_request
@@ -136,11 +113,11 @@ SQL_TEMPLATES: dict[str, SQLTemplate] = {
               AND refunded_at < %s
             LIMIT 1
         """,
-        params_factory=_month_range,
+        params_factory=_range_params,
         answer_factory=_answer_monthly_refund,
     ),
-    INTENT_CAMPUS_ENROLLMENT_RANK: SQLTemplate(
-        intent=INTENT_CAMPUS_ENROLLMENT_RANK,
+    "campus_enrollment_rank": SQLTemplate(
+        template_key="campus_enrollment_rank",
         sql="""
             SELECT COALESCE(campus.campus_name, '未分配校区') AS campus_name,
                    COUNT(DISTINCT rel.student_id) AS enrollment_count
@@ -155,8 +132,8 @@ SQL_TEMPLATES: dict[str, SQLTemplate] = {
         params_factory=lambda _: (DEFAULT_RANK_LIMIT,),
         answer_factory=_answer_campus_rank,
     ),
-    INTENT_SERIES_REFUND_AMOUNT_RANK: SQLTemplate(
-        intent=INTENT_SERIES_REFUND_AMOUNT_RANK,
+    "series_refund_amount_rank": SQLTemplate(
+        template_key="series_refund_amount_rank",
         sql="""
             SELECT series.series_name,
                    COALESCE(SUM(refund.approved_amount), 0) AS refund_amount
@@ -172,8 +149,8 @@ SQL_TEMPLATES: dict[str, SQLTemplate] = {
         params_factory=lambda _: (DEFAULT_RANK_LIMIT,),
         answer_factory=_answer_series_refund_rank,
     ),
-    INTENT_LAST_3_MONTH_COMPLETION_RATE: SQLTemplate(
-        intent=INTENT_LAST_3_MONTH_COMPLETION_RATE,
+    "last_3_month_completion_rate": SQLTemplate(
+        template_key="last_3_month_completion_rate",
         sql="""
             SELECT DATE_FORMAT(enroll_at, '%%Y-%%m') AS stat_month,
                    COUNT(DISTINCT CASE
@@ -201,7 +178,7 @@ SQL_TEMPLATES: dict[str, SQLTemplate] = {
             ORDER BY stat_month ASC
             LIMIT 3
         """,
-        params_factory=_last_3_months_range,
+        params_factory=_range_params,
         answer_factory=_answer_completion_rate,
     ),
 }

@@ -9,9 +9,12 @@ from typing import Any
 
 from ..database import fetch_all
 from ..utils import local_now
+from .dimension_registry import get_dimension
 from .errors import unsafe_sql, unsupported_query
-from .patterns import match_intent
-from .sql_templates import get_template
+from .metric_registry import get_metric
+from .patterns import match_query_pattern
+from .template_renderer import render_template
+from .time_range_parser import parse_time_range
 
 FORBIDDEN_SQL_WORDS = re.compile(
     r"\b(insert|update|delete|drop|alter|truncate|create|replace|merge)\b",
@@ -20,26 +23,41 @@ FORBIDDEN_SQL_WORDS = re.compile(
 
 
 def answer_query(question: str) -> dict[str, Any]:
-    intent = match_intent(question)
-    if intent is None:
+    pattern = match_query_pattern(question)
+    if pattern is None:
         raise unsupported_query()
 
-    template = get_template(intent)
-    sql = _normalize_sql(template.sql)
+    metric = get_metric(pattern.metric_code)
+    dimensions = [get_dimension(code) for code in pattern.dimensions]
+    now = local_now()
+    time_range = parse_time_range(pattern.time_range_kind, now)
+    if metric is None or any(dimension is None for dimension in dimensions) or time_range is None:
+        raise unsupported_query()
+
+    rendered = render_template(pattern.template_key, time_range)
+    if rendered is None:
+        raise unsupported_query()
+
+    sql = _normalize_sql(rendered.sql)
     _ensure_readonly_select(sql)
-    params = template.params_factory(local_now())
+    params = rendered.params
     rows = [_serialize_row(row) for row in fetch_all(sql, params)]
     return {
         "question": question,
-        "matchedIntent": intent,
+        "matchedIntent": pattern.intent,
         "sql": sql,
         "result": rows,
-        "answer": template.answer_factory(rows),
+        "answer": rendered.answer_factory(rows),
         "trace": {
             "mode": "rule_template",
             "llm": False,
             "rag": False,
             "langGraph": False,
+            "metricCode": metric.metric_code,
+            "metricName": metric.metric_name,
+            "dimensions": [dimension.dimension_code for dimension in dimensions if dimension],
+            "templateKey": rendered.template_key,
+            "timeRange": time_range.as_trace(),
             "sqlReadonly": True,
             "params": [_serialize_value(value) for value in params],
             "rowCount": len(rows),
