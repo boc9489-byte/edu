@@ -4,23 +4,20 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-import re
+from time import perf_counter
 from typing import Any
 
-from ..database import fetch_all
 from ..utils import local_now
 from .dimension_registry import get_dimension
-from .errors import unsafe_sql, unsupported_query
+from .errors import sql_unsafe, unsupported_query
 from .metadata_service import build_trace_metadata
 from .metric_registry import get_metric
 from .patterns import match_query_pattern
+from .sql_executor import execute_select
+from .sql_validator import validate_sql
 from .template_renderer import render_template
+from .trace import build_success_trace
 from .time_range_parser import parse_time_range
-
-FORBIDDEN_SQL_WORDS = re.compile(
-    r"\b(insert|update|delete|drop|alter|truncate|create|replace|merge)\b",
-    re.IGNORECASE,
-)
 
 
 def answer_query(question: str) -> dict[str, Any]:
@@ -40,43 +37,34 @@ def answer_query(question: str) -> dict[str, Any]:
         raise unsupported_query()
 
     sql = _normalize_sql(rendered.sql)
-    _ensure_readonly_select(sql)
     params = rendered.params
-    rows = [_serialize_row(row) for row in fetch_all(sql, params)]
+    validation = validate_sql(sql, params)
+    if not validation.passed:
+        raise sql_unsafe(validation.reason)
+
+    started_at = perf_counter()
+    rows = [_serialize_row(row) for row in execute_select(sql, params)]
+    duration_ms = (perf_counter() - started_at) * 1000
     trace_metadata = build_trace_metadata(metric.metric_code, pattern.dimensions)
+    row_count = len(rows)
     return {
         "question": question,
         "matchedIntent": pattern.intent,
         "sql": sql,
         "result": rows,
         "answer": rendered.answer_factory(rows),
-        "trace": {
-            "mode": "rule_template",
-            "llm": False,
-            "rag": False,
-            "langGraph": False,
-            "metricCode": metric.metric_code,
-            "metricName": metric.metric_name,
-            "dimensions": [dimension.dimension_code for dimension in dimensions if dimension],
-            "templateKey": rendered.template_key,
-            "timeRange": time_range.as_trace(),
-            "metadataTables": trace_metadata["tables"],
-            "metadataColumns": trace_metadata["columns"],
-            "sqlReadonly": True,
-            "params": [_serialize_value(value) for value in params],
-            "rowCount": len(rows),
-        },
+        "trace": build_success_trace(
+            metric=metric,
+            pattern=pattern,
+            time_range=time_range,
+            template_key=rendered.template_key,
+            metadata=trace_metadata,
+            validation=validation,
+            params=[_serialize_value(value) for value in params],
+            row_count=row_count,
+            duration_ms=duration_ms,
+        ),
     }
-
-
-def _ensure_readonly_select(sql: str) -> None:
-    stripped = sql.strip().lower()
-    if not stripped.startswith("select"):
-        raise unsafe_sql()
-    if FORBIDDEN_SQL_WORDS.search(stripped):
-        raise unsafe_sql()
-    if " limit " not in f" {stripped} ":
-        raise unsafe_sql()
 
 
 def _normalize_sql(sql: str) -> str:

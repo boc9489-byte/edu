@@ -89,6 +89,8 @@ def test_ask_query_supported_questions():
             assert data["trace"]["metadataTables"]
             assert data["trace"]["metadataColumns"]
             assert data["trace"]["sqlReadonly"] is True
+            assert data["trace"]["sqlValidation"]["passed"] is True
+            assert data["trace"]["sqlExecution"]["status"] == "success"
             assert data["trace"]["llm"] is False
             assert data["trace"]["rag"] is False
             assert data["trace"]["langGraph"] is False
