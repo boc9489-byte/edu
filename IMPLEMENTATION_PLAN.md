@@ -9,7 +9,7 @@
 ## 目录
 
 - [1. 项目定位与现状速览](#1-项目定位与现状速览)
-- [2. 业务域划分（12 域 / 64 表）](#2-业务域划分12-域--64-表)
+- [2. 业务域划分（12 域 / 66 表）](#2-业务域划分12-域--66-表)
 - [3. 代码实现盘点](#3-代码实现盘点)
 - [4. 数据生成依赖顺序（Layer1 → Layer7）](#4-数据生成依赖顺序layer1--layer7)
 - [5. README 与代码差异分析](#5-readme-与代码差异分析)
@@ -24,7 +24,7 @@
 
 `edu-data` 是一个 **在线教育业务全链路样本数据 + REST API** 工程，目标是：
 
-- 用 **一份 SQL** 定义 64 张业务表，覆盖维度/组织/课程/题库/营销/转化/交易/履约/学习/互动/服务/经营 12 个业务域。
+- 用 **一份 SQL** 定义 66 张业务表，覆盖维度/组织/课程/题库/营销/转化/交易/履约/学习/互动/服务/经营 12 个业务域。
 - 用 **分层生成器**（Layer1–Layer7）按因果顺序造出可学习、可下单、可退款、可分析的样本数据。
 - 用 **FastAPI** 暴露 12 个路由共 52 个端点，模拟学员视角的完整业务交互。
 
@@ -32,7 +32,7 @@
 |---|---|
 | 代码体量 | 约 11.7k 行（生成层 ~5.0k + 校验 ~2.6k + API ~3.5k + 其他） |
 | 数据库 | MySQL 8.0（`docker/docker-compose.yaml` 内置） |
-| 表数 | SQL 与 README 均为 **64 张**（一一对应） |
+| 表数 | SQL 与 README 均为 **66 张**（一一对应） |
 | 端点数 | 路由实现 **52 个**，与 README §接口定义 1.1–12.5 编号一致 |
 | 测试 | 5 个 `pytest` 集成测试文件 |
 | 静态扫描 | 全代码无 `TODO/FIXME`；`not_implemented` 帮助函数已定义但未被调用 |
@@ -41,7 +41,7 @@
 
 ---
 
-## 2. 业务域划分（12 域 / 64 表）
+## 2. 业务域划分（12 域 / 66 表）
 
 | # | 业务域 | 主代表表 | 表数 | 所属 Layer |
 |---|---|---|---|---|
@@ -58,7 +58,7 @@
 | 11 | 服务 | `service_ticket` `service_ticket_follow_record` `service_ticket_satisfaction_survey` | 3 | 5 |
 | 12 | 经营衍生 | `teacher_compensation_bill` `teacher_compensation_item` `channel_commission_bill` `channel_commission_item` `risk_alert_event` `risk_disposal_record` `ugc_moderation_task` | 7 | 6 |
 
-合计 **64 表**，与 [`sql/edu.sql`](./sql/edu.sql) 中 64 条 `CREATE TABLE` 一致。
+合计 **66 表**，与 [`sql/edu.sql`](./sql/edu.sql) 中 66 条 `CREATE TABLE` 一致。
 
 ---
 
@@ -70,7 +70,7 @@
 |---|---|
 | [`init_db.py`](./init_db.py) | `DBInit` 抽象基类 + `MyInit` MySQL 实现：drop → create → exec_sql；可选反射生成 ORM |
 | [`docker/docker-compose.yaml`](./docker/docker-compose.yaml) | 单节点 `mysql:8.0`，端口 3306，编码 utf8mb4 |
-| [`sql/edu.sql`](./sql/edu.sql) | 64 张表定义，含枚举注释与索引 |
+| [`sql/edu.sql`](./sql/edu.sql) | 66 张表定义，含枚举注释与索引 |
 
 > `DBInit` 中的 6 处 `raise NotImplementedError` 是抽象方法占位，`MyInit` 全部 override；非实现遗留。
 
@@ -197,7 +197,7 @@ Layer7: validate_layer7() 全库验收
 
 ### 5.1 已对齐项
 
-- [x] SQL 表数（64）= README 表数（64）
+- [x] SQL 表数（66）= README 表数（66）
 - [x] 路由端点数（52）= README §接口定义条目数（52）
 - [x] 7 个 Layer 的 Checklist 在 README 中均已勾选
 - [x] 路由编号 1.1–12.5 与代码端点 URL 一一可查
@@ -368,7 +368,7 @@ edu-data/
 ├─ docker/
 │  └─ docker-compose.yaml           # MySQL 8.0 单机
 ├─ sql/
-│  └─ edu.sql                        # 64 张表 DDL（1541 行）
+│  └─ edu.sql                        # 66 张表 DDL（1541 行）
 ├─ seeds/
 │  ├─ 1_foundation/                  # 10 个维度/组织 CSV
 │  ├─ 2_course/                      # series.csv + series_course.csv
