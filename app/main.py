@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from .config import APP_PORT
 from .errors import AppError
 from .response import fail
+from .routers.ask import router as ask_router
 from .routers.cart import router as cart_router
 from .routers.consultations import router as consultations_router
 from .routers.coupons import router as coupons_router
@@ -39,6 +40,7 @@ OPENAPI_TAGS = [
 
 app = FastAPI(title="Edu Data API", version="0.1.0", openapi_tags=OPENAPI_TAGS)
 
+app.include_router(ask_router)
 app.include_router(users_router)
 app.include_router(courses_router)
 app.include_router(favorites_router)
