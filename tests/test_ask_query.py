@@ -81,6 +81,10 @@ def test_ask_query_supported_questions():
             assert isinstance(data["result"], list)
             assert data["answer"]
             assert data["trace"]["mode"] == "rule_template"
+            assert data["trace"]["traceId"]
+            assert data["trace"]["understandingMode"] == "rule"
+            assert data["trace"]["llmExtraction"] is None
+            assert data["trace"]["semanticLinking"]["source"] == "rule"
             assert data["trace"]["metricCode"] == metric_code
             assert data["trace"]["metricName"]
             assert data["trace"]["dimensions"] == dimensions

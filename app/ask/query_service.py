@@ -10,9 +10,11 @@ from typing import Any
 from ..utils import local_now
 from .dimension_registry import get_dimension
 from .errors import sql_unsafe, unsupported_query
+from .llm_extractor import extract_with_llm, is_llm_extract_enabled
 from .metadata_service import build_trace_metadata
 from .metric_registry import get_metric
 from .patterns import match_query_pattern
+from .semantic_linker import link_extraction
 from .sql_executor import execute_select
 from .sql_validator import validate_sql
 from .template_renderer import render_template
@@ -22,8 +24,29 @@ from .time_range_parser import parse_time_range
 
 def answer_query(question: str) -> dict[str, Any]:
     pattern = match_query_pattern(question)
+    understanding_mode = "rule"
+    llm_extraction_trace = None
+    semantic_linking_trace = None
     if pattern is None:
-        raise unsupported_query()
+        if not is_llm_extract_enabled():
+            raise unsupported_query()
+        extraction = extract_with_llm(question)
+        if extraction is None:
+            raise unsupported_query()
+        link_result = link_extraction(extraction)
+        if link_result is None:
+            raise unsupported_query()
+        pattern = link_result.pattern
+        understanding_mode = "llm"
+        llm_extraction_trace = extraction.to_trace()
+        semantic_linking_trace = link_result.to_trace()
+    else:
+        semantic_linking_trace = {
+            "matched": True,
+            "source": "rule",
+            "intent": pattern.intent,
+            "templateKey": pattern.template_key,
+        }
 
     metric = get_metric(pattern.metric_code)
     dimensions = [get_dimension(code) for code in pattern.dimensions]
@@ -63,6 +86,9 @@ def answer_query(question: str) -> dict[str, Any]:
             params=[_serialize_value(value) for value in params],
             row_count=row_count,
             duration_ms=duration_ms,
+            understanding_mode=understanding_mode,
+            llm_extraction=llm_extraction_trace,
+            semantic_linking=semantic_linking_trace,
         ),
     }
 
