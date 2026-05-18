@@ -86,6 +86,8 @@ def test_ask_query_supported_questions():
             assert data["trace"]["dimensions"] == dimensions
             assert data["trace"]["templateKey"] == template_key
             assert data["trace"]["timeRange"]["kind"] == time_range_kind
+            assert data["trace"]["metadataTables"]
+            assert data["trace"]["metadataColumns"]
             assert data["trace"]["sqlReadonly"] is True
             assert data["trace"]["llm"] is False
             assert data["trace"]["rag"] is False

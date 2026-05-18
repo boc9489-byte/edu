@@ -11,6 +11,7 @@ from ..database import fetch_all
 from ..utils import local_now
 from .dimension_registry import get_dimension
 from .errors import unsafe_sql, unsupported_query
+from .metadata_service import build_trace_metadata
 from .metric_registry import get_metric
 from .patterns import match_query_pattern
 from .template_renderer import render_template
@@ -42,6 +43,7 @@ def answer_query(question: str) -> dict[str, Any]:
     _ensure_readonly_select(sql)
     params = rendered.params
     rows = [_serialize_row(row) for row in fetch_all(sql, params)]
+    trace_metadata = build_trace_metadata(metric.metric_code, pattern.dimensions)
     return {
         "question": question,
         "matchedIntent": pattern.intent,
@@ -58,6 +60,8 @@ def answer_query(question: str) -> dict[str, Any]:
             "dimensions": [dimension.dimension_code for dimension in dimensions if dimension],
             "templateKey": rendered.template_key,
             "timeRange": time_range.as_trace(),
+            "metadataTables": trace_metadata["tables"],
+            "metadataColumns": trace_metadata["columns"],
             "sqlReadonly": True,
             "params": [_serialize_value(value) for value in params],
             "rowCount": len(rows),
