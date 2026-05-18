@@ -14,6 +14,7 @@
 - [4. 数据生成依赖顺序（Layer1 → Layer7）](#4-数据生成依赖顺序layer1--layer7)
 - [5. README 与代码差异分析](#5-readme-与代码差异分析)
 - [6. 分阶段执行计划](#6-分阶段执行计划)
+- [Phase 2 接口语义核验结果](#phase-2-接口语义核验结果)
 - [7. 风险点与改进建议](#7-风险点与改进建议)
 - [8. 常用命令速查](#8-常用命令速查)
 - [9. 文件目录索引](#9-文件目录索引)
@@ -277,6 +278,73 @@ Layer7: validate_layer7() 全库验收
 - [ ] 2.12 `tickets`（12.1–12.5）：退款类工单必须关联 `refund_request`，满意度仅对已关闭工单
 
 **出口判据**：每个端点至少 1 例 happy + 1 例 error 已通过；不一致项已修复或登记为后续 issue。
+
+---
+
+## Phase 2 接口语义核验结果
+
+### 1. 核验范围
+
+- 第一轮：`payments` / `enrollments` / `study`，22 个端点。
+- 第二轮：`orders` / `cart` / `favorites`，11 个端点。
+- 第三轮：`users` / `courses` / `consultations` / `coupons` / `interactions` / `tickets`，19 个端点。
+- 合计 12 个 router / 52 个端点，100% 完成只读核验。
+
+### 2. 主要问题分类
+
+- `end_date` / `sale_status` 过滤缺失。
+- API 创建订单不生成 `student_cohort_rel`。
+- `access_scope` / `review_status` / `transcode_status` 权限校验缺失。
+- `enrollments progress` 分母语义偏离。
+- `refund` 累计金额上限缺失。
+- `coupon valid_from` 判断缺失。
+- API 与 generator 口径不一致。
+- `cart` / `favorite` 与 `orders API` 链路割裂。
+- tests 多为 happy path，缺少 error path 与边界断言。
+
+### 3. 高优先级问题清单
+
+| 编号 | 问题 | 涉及接口域 | 严重程度 | 建议阶段 |
+|---|---|---|---|---|
+| P2-001 | `POST /orders`、`POST /payments`、`courses/cohorts`、`consultations` 缺少 `end_date` / `sale_status` 过滤 | orders / payments / courses / consultations | P0 | Phase 2.1 |
+| P2-002 | payment mock paid 后不创建 `student_cohort_rel` | payments / enrollments | P0 | Phase 2.1 |
+| P2-003 | refund request 未扣除历史已审批 / 已退款金额 | payments | P0 | Phase 2.1 |
+| P2-004 | study 视频不校验 `review_status` / `transcode_status` | study | P0 | Phase 2.1 |
+| P2-005 | study 资源不校验 `access_scope` | study | P0 | Phase 2.1 |
+| P2-006 | enrollments progress 的 `totalSessions` / `totalVideos` / `totalHomeworks` / `totalExams` 分母口径不准 | enrollments | P1 | Phase 2.1 |
+| P2-007 | coupons receive 未校验 `valid_from` | coupons | P1 | Phase 2.1 |
+| P2-008 | API 创建订单后无法进入 enrollments / study / reviews 链路 | orders / payments / enrollments / study / interactions | P0 | Phase 2.1 |
+
+### 4. Phase 2 状态判断
+
+- Phase 2 全量只读核验已完成。
+- 12 个 router / 52 个端点已全部核验。
+- 当前不修复代码。
+- 可以进入问题分级与修复排期。
+- 不建议在问题未分级前直接进入大范围编码。
+
+### 5. 下一阶段建议
+
+进入：**Phase 2.1：问题分级与修复排期**。
+
+优先级建议：
+
+P0：
+- API 创建订单并支付后生成 `student_cohort_rel`。
+- `end_date` / `sale_status` 统一拦截。
+- study `access_scope` / `review_status` / `transcode_status` 权限拦截。
+- refund 累计金额上限。
+
+P1：
+- enrollments progress 分母修正。
+- coupons `valid_from`。
+- `service_period_days` 口径统一。
+- `order_no` 口径统一。
+
+P2：
+- `cart` / `favorite` 与 orders 链路是否需要显式消费。
+- tests error path 增强。
+- tickets / interactions 边界一致性。
 
 ---
 
