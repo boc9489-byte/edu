@@ -15,6 +15,7 @@
 - [5. README 与代码差异分析](#5-readme-与代码差异分析)
 - [6. 分阶段执行计划](#6-分阶段执行计划)
 - [Phase 2 接口语义核验结果](#phase-2-接口语义核验结果)
+- [教育问数系统开发路线](#教育问数系统开发路线)
 - [7. 风险点与改进建议](#7-风险点与改进建议)
 - [8. 常用命令速查](#8-常用命令速查)
 - [9. 文件目录索引](#9-文件目录索引)
@@ -374,6 +375,414 @@ P2：
 - [ ] 4.6 可选：在 `init_db.py:prepare()` 中启用 `output_path`，用 `sqlacodegen` 反射生成 ORM 文件
 
 **出口判据**：每项增量按 `修改文件 / 原因 / 验证方式 / 是否影响已有逻辑`（参见 `CLAUDE.md` §9）提交。
+
+---
+
+## 教育问数系统开发路线
+
+本路线基于 [`需求说明.md`](./需求说明.md)、[`技术文档.md`](./技术文档.md)、[`README.md`](./README.md)、[`CLAUDE.md`](./CLAUDE.md) 与本文档重新调整。自本节起，当前开发主线切换为 **教育问数系统 / NL2SQL / 元数据 RAG / LangGraph**。
+
+Phase 0–Phase 2.1 的 edu-data 数据底座与 API 语义核验结果继续保留，作为数据底座说明、已知限制与后续可选加固项；它不再作为当前开发主线。问数系统以现有 edu-data 业务数据库为查询对象，优先建设只读指标查询、维度分析、趋势对比、结构化结果返回和可追踪 SQL 执行链路。
+
+### 项目目标
+
+基于 edu-data 业务数据库，构建教育问数系统，支持自然语言指标查询、维度分析、趋势对比、结构化结果返回。
+
+首版采用规则模板方式跑通闭环；后续逐步引入指标注册表、语义元数据、SQL 安全与 trace、元数据 RAG、LangGraph 工作流、调试页面与全量验收。
+
+### A 线状态：数据底座说明 / 已知限制 / 非目标
+
+- edu-data 的 66 张业务表、数据生成链路与 52 个业务 API 仍是问数系统的数据底座。
+- Phase 2 三轮接口语义核验结果继续作为已知限制清单保留。
+- 业务 API 语义加固从当前主线降级为非目标，不阻塞 Ask 主线推进。
+- 问数结果以现有数据库中的真实数据为准；若业务 API 与生成数据口径存在差异，先在问数层记录口径，不在当前阶段修复业务 API。
+
+### 当前非目标
+
+- 当前不修复 `orders` / `payments` / `enrollments` / `study` 等业务 API。
+- 当前不修复 P0-02 / P0-03 / P0-04 / P0-05。
+- 当前不修改 `generate` 数据生成链路。
+- 当前只做只读问数能力。
+- 当前问数结果以现有 edu-data 数据库为准。
+
+### 提交策略
+
+1. 文档路线单独 commit。
+2. Ask-0 MVP 代码单独 commit。
+3. 后续每个 Ask 阶段单独 commit。
+4. 不把业务 API 修复和问数系统开发混在一个 commit。
+
+### Ask-0：规则模板版问数 MVP
+
+**目标**
+
+- 新增最小可用的 `POST /ask/query` 问数接口。
+- 使用规则匹配 + 参数化 SQL 模板支持首批 6 个自然语言问题。
+- 所有 SQL 只允许 `SELECT`，返回结构化结果、答案文本、SQL 与 trace。
+- 不接 LLM、不接 RAG、不接 LangGraph。
+
+**输入**
+
+- `sql/edu.sql` 中核心表真实字段：`student_cohort_rel`、`payment_record`、`refund_request`、`order`、`order_item`、`series`、`series_cohort`、`org_campus`。
+- `需求说明.md` 中的基础指标问题。
+- `技术文档.md` 中的只读 SQL、安全校验和 trace 要求。
+- 当前 FastAPI 应用结构与响应封装。
+
+**输出**
+
+- `POST /ask/query`。
+- 6 个固定问题的规则意图识别。
+- 参数化 SQL 模板与 SELECT-only 校验。
+- SQL trace：匹配意图、SQL、参数、只读校验、行数。
+- Ask 专项测试。
+
+**涉及文件**
+
+- `app/ask/__init__.py`
+- `app/ask/schemas.py`
+- `app/ask/errors.py`
+- `app/ask/patterns.py`
+- `app/ask/sql_templates.py`
+- `app/ask/query_service.py`
+- `app/routers/ask.py`
+- `app/main.py`：仅注册 ask router。
+- `tests/test_ask_query.py`
+
+**验证命令**
+
+```bash
+uv run pytest tests/test_ask_query.py
+make test
+```
+
+**出口判据**
+
+- 6 个首批问题均可返回 `code=0`、结构化结果、SQL 和 trace。
+- 不支持的问题返回可解释错误。
+- SQL 校验拒绝非 `SELECT` 与危险关键字。
+- `tests/test_ask_query.py` 与 `make test` 全绿。
+
+### Ask-1：指标注册表与 SQL 模板
+
+**目标**
+
+- 将 Ask-0 中硬编码的模板整理为可注册、可检索、可扩展的指标注册表。
+- 定义指标 code、中文名、业务口径、时间字段、聚合方式、默认过滤、可用维度、模板参数。
+- 支持报名人数、收入金额、退款金额、完课率、出勤率、咨询数、转化率等核心指标逐步纳入。
+
+**输入**
+
+- `需求说明.md` 的基础指标、维度分析、趋势对比需求。
+- `技术文档.md` 的指标配置示例。
+- Ask-0 的 `sql_templates.py`。
+- `README.md` 与 `sql/edu.sql` 中交易、履约、学习、退款表字段。
+
+**输出**
+
+- 指标注册表结构。
+- 指标 SQL 模板注册与渲染服务。
+- 指标样例集与期望结果断言。
+- 首批指标口径文档化。
+
+**涉及文件**
+
+- `app/ask/metrics.py`
+- `app/ask/sql_templates.py`
+- `app/ask/query_service.py`
+- `conf/ask_metrics.yaml` 或同等配置文件。
+- `tests/test_ask_metrics.py`
+- `tests/test_ask_query.py`
+
+**验证命令**
+
+```bash
+uv run pytest tests/test_ask_metrics.py tests/test_ask_query.py
+make test
+```
+
+**出口判据**
+
+- 首批指标均可通过注册表查询与渲染。
+- 每个指标都有明确口径、默认过滤条件、时间字段和可用维度。
+- 模板 SQL 均为参数化 `SELECT`。
+- 指标结果与手写 SQL 抽样结果一致。
+
+### Ask-2：语义元数据层
+
+**目标**
+
+- 把 edu-data 的核心表与字段转换为可检索、可解释、可约束的语义元数据。
+- 建立表、字段、字段角色、业务域、字段别名、字段示例值、敏感字段标记。
+- 为后续元数据 RAG 和 NL2SQL 生成提供稳定上下文。
+
+**输入**
+
+- `sql/edu.sql` 中的真实 schema。
+- `README.md` 的业务表说明。
+- `技术文档.md` 中的 `table_info`、`column_info`、`metric_info`、`column_metric` 设计。
+- Ask-1 的指标注册表。
+
+**输出**
+
+- 语义表元数据与字段元数据。
+- 字段角色：`primary_key` / `foreign_key` / `dimension` / `measure`。
+- 字段别名、中文释义、业务域、敏感字段配置。
+- 元数据构建脚本初版。
+
+**涉及文件**
+
+- `app/ask/metadata.py`
+- `app/ask/metadata_builder.py`
+- `app/ask/metadata_repository.py`
+- `conf/ask_metadata.yaml`
+- `scripts/build_ask_metadata.py` 或 `app/scripts/build_ask_metadata.py`
+- `tests/test_ask_metadata.py`
+
+**验证命令**
+
+```bash
+uv run python -m app.scripts.build_ask_metadata
+uv run pytest tests/test_ask_metadata.py
+make test
+```
+
+**出口判据**
+
+- 核心问数表全部进入元数据层。
+- 核心分析字段具备中文释义、字段角色、业务域和敏感标记。
+- 元数据构建脚本可重复运行且结果幂等。
+- Ask-1 指标能关联到正确表字段。
+
+### Ask-3：SQL 安全、执行与 Trace
+
+**目标**
+
+- 建立统一 SQL 安全校验、执行与 trace 记录层。
+- 只允许只读 `SELECT`，拒绝 DDL / DML / 多语句 / 危险关键字。
+- 为每次问数返回可追踪的 SQL、参数、耗时、行数、错误信息。
+
+**输入**
+
+- Ask-0 / Ask-1 的 SQL 模板。
+- `技术文档.md` 的 SQL 校验与 trace 要求。
+- 当前数据库访问工具与响应封装。
+
+**输出**
+
+- SQL 安全校验服务。
+- SQL 执行服务。
+- trace 数据结构。
+- 错误码：不支持问题、危险 SQL、执行失败、结果为空等。
+
+**涉及文件**
+
+- `app/ask/sql_security.py`
+- `app/ask/sql_executor.py`
+- `app/ask/trace.py`
+- `app/ask/errors.py`
+- `app/ask/query_service.py`
+- `tests/test_ask_sql_security.py`
+- `tests/test_ask_query.py`
+
+**验证命令**
+
+```bash
+uv run pytest tests/test_ask_sql_security.py tests/test_ask_query.py
+make test
+```
+
+**出口判据**
+
+- 非 `SELECT`、多语句、危险关键字全部被拒绝。
+- 所有执行 SQL 都使用参数化查询。
+- trace 记录意图、模板、SQL、参数、耗时、行数和错误。
+- SQL 安全测试覆盖 happy path 与 error path。
+
+### Ask-4：元数据 RAG
+
+**目标**
+
+- 基于语义元数据实现指标、字段、表、字段值的多路召回。
+- 支持关键词召回、向量召回与字段值召回。
+- 为后续 NL2SQL 提供可解释上下文。
+
+**输入**
+
+- Ask-1 指标注册表。
+- Ask-2 语义元数据。
+- `技术文档.md` 中 Qdrant / Elasticsearch / MySQL Meta 的召回设计。
+- 问数样例集。
+
+**输出**
+
+- 指标召回服务。
+- 字段召回服务。
+- 字段值召回服务。
+- 召回上下文合并结果。
+- RAG trace。
+
+**涉及文件**
+
+- `app/ask/retrievers/`
+- `app/ask/rag_service.py`
+- `app/ask/metadata_repository.py`
+- `app/ask/metrics.py`
+- `app/clients/qdrant_client.py`
+- `app/clients/elasticsearch_client.py`
+- `tests/test_ask_rag.py`
+
+**验证命令**
+
+```bash
+uv run pytest tests/test_ask_rag.py tests/test_ask_query.py
+make test
+```
+
+**出口判据**
+
+- 基础指标问题能召回正确指标与字段。
+- 维度问题能召回正确维度字段。
+- 字段值问题能匹配数据库真实值。
+- trace 展示召回来源、score 与最终上下文。
+
+### Ask-5：LangGraph 工作流
+
+**目标**
+
+- 实现“问题理解 → 元数据召回 → 指标匹配 → SQL 生成 → SQL 校验 → SQL 执行 → 答案生成”的 LangGraph 工作流。
+- 将 Ask-1 到 Ask-4 的能力编排成可观测、可扩展、可降级的问数智能体。
+- 在元数据和指标约束下生成或选择可执行 SQL。
+
+**输入**
+
+- Ask-1 指标注册表与 SQL 模板。
+- Ask-2 语义元数据。
+- Ask-3 SQL 安全、执行与 trace。
+- Ask-4 元数据 RAG。
+- `技术文档.md` 中的 QueryState 和节点设计。
+
+**输出**
+
+- `QueryState` 状态结构。
+- LangGraph 节点：预处理、关键词抽取、指标召回、字段召回、上下文合并、SQL 生成、SQL 校验、SQL 执行、答案生成。
+- 节点级 trace。
+- 降级策略：模板可回答时优先模板，复杂问题再走 RAG / LLM。
+
+**涉及文件**
+
+- `app/ask/agent/state.py`
+- `app/ask/agent/graph.py`
+- `app/ask/agent/nodes/`
+- `app/ask/query_service.py`
+- `prompts/ask/`
+- `tests/test_ask_agent.py`
+- `tests/test_ask_query.py`
+
+**验证命令**
+
+```bash
+uv run pytest tests/test_ask_agent.py tests/test_ask_query.py
+make test
+```
+
+**出口判据**
+
+- QueryState 能完整记录节点输入、输出、错误和耗时。
+- 首批样例问题能完成端到端工作流。
+- SQL 生成结果通过 Ask-3 安全校验。
+- 节点失败时返回可解释错误，不影响服务进程。
+
+### Ask-6：调试页面 / 演示闭环
+
+**目标**
+
+- 提供问数 API、流式进度接口和基础调试页面。
+- 展示问题、召回上下文、生成 SQL、执行结果、自然语言答案和 trace。
+- 完成可演示的“提问 → 分析 → SQL → 结果 → 答案”闭环。
+
+**输入**
+
+- Ask-5 LangGraph 工作流。
+- `技术文档.md` 中的 API、SSE 和调试页面设计。
+- `需求说明.md` 中的验收问题。
+
+**输出**
+
+- `POST /ask/query` 稳定版。
+- 可选 `POST /ask/query/stream` SSE 接口。
+- Debug UI。
+- 演示问题集与操作说明。
+
+**涉及文件**
+
+- `app/routers/ask.py`
+- `app/ask/schemas.py`
+- `app/ask/query_service.py`
+- `app/static/ask_debug.html` 或 `debug/ask/`
+- `tests/test_ask_api.py`
+- `tests/test_ask_stream.py`
+
+**验证命令**
+
+```bash
+uv run pytest tests/test_ask_api.py tests/test_ask_stream.py
+make test
+uv run -m app.main
+```
+
+**出口判据**
+
+- 问数接口返回 SQL、结构化结果、自然语言答案和 trace。
+- 流式接口能输出 progress / sql / result / done 事件。
+- 调试页面可完成至少 6 个样例问题演示。
+- 错误场景返回可解释错误，不暴露敏感字段。
+
+### Ask-7：验收与全量回归
+
+**目标**
+
+- 在 smoke 与 full 数据规模下验证问数系统整体稳定性。
+- 对照需求验收标准完成基础指标、维度分析、趋势对比、排名分析和演示闭环。
+- 形成最终验收报告和后续优化清单。
+
+**输入**
+
+- Ask-0 到 Ask-6 全部产物。
+- smoke / full profile 业务数据。
+- 问数样例集与验收用例。
+- SQL 安全、可解释性、可观测性要求。
+
+**输出**
+
+- 全量回归报告。
+- 验收样例结果：报名人数、收入金额、退款金额、完课率、出勤率、咨询数、转化率。
+- SQL 安全测试报告。
+- 性能与可观测性报告。
+- 后续优化清单：多轮问数、指标血缘、语义缓存、SQL 成本估计、智能报表。
+
+**涉及文件**
+
+- `tests/test_ask_acceptance.py`
+- `tests/fixtures/ask_questions.yaml`
+- `docs/ask_acceptance_report.md`
+- `scripts/run_ask_acceptance.py`
+
+**验证命令**
+
+```bash
+make smoke
+make test
+make gen
+uv run pytest tests/test_ask_acceptance.py
+```
+
+**出口判据**
+
+- `make test` 全绿。
+- smoke 与 full 数据下核心问数样例均可执行。
+- 需求说明中的基础指标、维度统计、趋势/对比/排名请求均至少有 1 条通过样例。
+- 所有执行 SQL 均为安全 `SELECT`，禁止 DDL / DML。
+- 完成一次完整闭环演示并留存验收记录。
 
 ---
 
