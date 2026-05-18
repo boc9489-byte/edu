@@ -1,4 +1,4 @@
-.PHONY: help init_db gen smoke run clean
+.PHONY: help init_db gen smoke run test clean
 
 help:
 	@echo "make init_db      	- 初始化数据库"
@@ -20,6 +20,9 @@ smoke:
 
 run:
 	uv run -m app.main
+
+test:
+	uv run pytest tests/
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
