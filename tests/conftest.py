@@ -53,7 +53,13 @@ class SampleData:
             SELECT s.id AS series_id, c.id AS cohort_id
             FROM series AS s
             JOIN series_cohort AS c ON c.series_id = s.id
-            WHERE s.sale_status = 'on_sale' AND c.yn = 1
+            WHERE s.sale_status = 'on_sale'
+              AND c.yn = 1
+              AND c.current_student_count < c.max_student_count
+              AND (
+                    s.delivery_mode = 'online_recorded'
+                    OR (c.end_date IS NOT NULL AND c.end_date >= CURDATE())
+                )
             ORDER BY s.id, c.id
             LIMIT 1
             """
@@ -93,6 +99,16 @@ class SampleData:
             JOIN student_cohort_rel AS rel
               ON rel.student_id = sp.id
              AND rel.enroll_status NOT IN ('cancelled', 'refunded')
+            JOIN series_cohort AS c
+              ON c.id = rel.cohort_id
+             AND c.yn = 1
+            JOIN series AS s
+              ON s.id = c.series_id
+             AND s.sale_status = 'on_sale'
+             AND (
+                   s.delivery_mode = 'online_recorded'
+                   OR (c.end_date IS NOT NULL AND c.end_date >= CURDATE())
+                 )
             JOIN dim_channel AS ch ON ch.yn = 1
             ORDER BY rel.id, ch.id
             LIMIT 1
@@ -225,10 +241,16 @@ class SampleData:
         )
         cohorts = fetch_all(
             """
-            SELECT id AS cohort_id, series_id
-            FROM series_cohort
-            WHERE yn = 1
-            ORDER BY id
+            SELECT c.id AS cohort_id, c.series_id
+            FROM series_cohort AS c
+            JOIN series AS s ON s.id = c.series_id
+            WHERE c.yn = 1
+              AND s.sale_status = 'on_sale'
+              AND (
+                    s.delivery_mode = 'online_recorded'
+                    OR (c.end_date IS NOT NULL AND c.end_date >= CURDATE())
+                  )
+            ORDER BY c.id
             LIMIT 200
             """
         )
@@ -274,9 +296,15 @@ class SampleData:
                 SELECT series_id
                 FROM (
                     SELECT series_id
-                    FROM series_cohort
-                    WHERE yn = 1
-                    ORDER BY id
+                    FROM series_cohort AS c
+                    JOIN series AS s ON s.id = c.series_id
+                    WHERE c.yn = 1
+                      AND s.sale_status = 'on_sale'
+                      AND (
+                            s.delivery_mode = 'online_recorded'
+                            OR (c.end_date IS NOT NULL AND c.end_date >= CURDATE())
+                          )
+                    ORDER BY c.id
                     LIMIT 200
                 ) AS limited_cohorts
             )
@@ -486,3 +514,70 @@ def headers(user_id: int) -> dict[str, str]:
 @pytest.fixture()
 def user_headers():
     return headers
+
+
+@pytest.fixture()
+def availability_subject():
+    row = fetch_one(
+        """
+        SELECT
+            s.id AS series_id,
+            s.sale_status,
+            s.delivery_mode,
+            c.id AS cohort_id,
+            c.yn,
+            c.end_date,
+            c.max_student_count,
+            c.current_student_count
+        FROM series AS s
+        JOIN series_cohort AS c ON c.series_id = s.id
+        WHERE s.sale_status = 'on_sale'
+          AND c.yn = 1
+          AND c.current_student_count < c.max_student_count
+          AND (
+                s.delivery_mode = 'online_recorded'
+                OR (c.end_date IS NOT NULL AND c.end_date >= CURDATE())
+              )
+        ORDER BY s.id, c.id
+        LIMIT 1
+        """
+    )
+    assert row is not None
+    try:
+        yield {
+            "series_id": int(row["series_id"]),
+            "cohort_id": int(row["cohort_id"]),
+            "sale_status": row["sale_status"],
+            "delivery_mode": row["delivery_mode"],
+            "yn": row["yn"],
+            "end_date": row["end_date"],
+            "max_student_count": row["max_student_count"],
+            "current_student_count": row["current_student_count"],
+        }
+    finally:
+        with db_cursor() as (_, cursor):
+            cursor.execute(
+                """
+                UPDATE series
+                SET sale_status = %s, delivery_mode = %s
+                WHERE id = %s
+                """,
+                (row["sale_status"], row["delivery_mode"], row["series_id"]),
+            )
+            cursor.execute(
+                """
+                UPDATE series_cohort
+                SET yn = %s,
+                    end_date = %s,
+                    max_student_count = %s,
+                    current_student_count = %s
+                WHERE id = %s
+                """,
+                (
+                    row["yn"],
+                    row["end_date"],
+                    row["max_student_count"],
+                    row["current_student_count"],
+                    row["cohort_id"],
+                ),
+            )

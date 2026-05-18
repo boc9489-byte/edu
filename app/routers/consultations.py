@@ -12,6 +12,7 @@ from ..dependencies import get_current_user_id
 from ..errors import bad_request, conflict, not_found
 from ..response import ok
 from ..utils import count_total, format_datetime, local_now, offset_limit
+from .cohort_availability import ensure_cohort_tradable
 
 router = APIRouter(prefix="/api/v1", tags=["consultations"])
 
@@ -30,16 +31,14 @@ class ConsultationCreateRequest(BaseModel):
 def ensure_cohort(cohort_id: int) -> dict[str, object]:
     row = fetch_one(
         """
-        SELECT cohort.*, series.delivery_mode
+        SELECT cohort.*, series.delivery_mode, series.sale_status
         FROM series_cohort AS cohort
         JOIN series ON series.id = cohort.series_id
-        WHERE cohort.id = %s AND cohort.yn = 1
+        WHERE cohort.id = %s
         """,
         (cohort_id,),
     )
-    if row is None:
-        raise not_found("COHORT_NOT_FOUND", "班次不存在")
-    return row
+    return ensure_cohort_tradable(row)
 
 
 @router.post("/cohorts/{cohort_id}/consultations")

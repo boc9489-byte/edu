@@ -43,6 +43,42 @@ def notify_payment_paid(client, payment: dict[str, object]) -> None:
     assert response.status_code == 200
 
 
+def close_subject_as_live_cohort(db, subject):
+    with db["cursor"]() as (_, cursor):
+        cursor.execute(
+            "UPDATE series SET sale_status = 'on_sale', delivery_mode = 'online_live' WHERE id = %s",
+            (subject["series_id"],),
+        )
+        cursor.execute(
+            """
+            UPDATE series_cohort
+            SET yn = 1,
+                end_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY),
+                max_student_count = current_student_count + 1
+            WHERE id = %s
+            """,
+            (subject["cohort_id"],),
+        )
+
+
+def make_subject_recorded_with_past_end(db, subject):
+    with db["cursor"]() as (_, cursor):
+        cursor.execute(
+            "UPDATE series SET sale_status = 'on_sale', delivery_mode = 'online_recorded' WHERE id = %s",
+            (subject["series_id"],),
+        )
+        cursor.execute(
+            """
+            UPDATE series_cohort
+            SET yn = 1,
+                end_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY),
+                max_student_count = current_student_count + 1
+            WHERE id = %s
+            """,
+            (subject["cohort_id"],),
+        )
+
+
 def test_post_orders_quote(client, samples, user_headers):
     user = samples.user_with_student
     row = samples.on_sale_series_with_cohort
@@ -53,6 +89,54 @@ def test_post_orders_quote(client, samples, user_headers):
     )
     assert response.status_code == 200
     assert response.json()["data"]["cohortId"] == row["cohort_id"]
+
+
+def test_post_orders_quote_series_not_on_sale(client, db, availability_subject, samples, user_headers):
+    user = samples.user_with_student
+    with db["cursor"]() as (_, cursor):
+        cursor.execute(
+            "UPDATE series SET sale_status = 'off_sale' WHERE id = %s",
+            (availability_subject["series_id"],),
+        )
+    response = client.post(
+        "/api/v1/orders/quote",
+        headers=user_headers(user["user_id"]),
+        json={"cohortId": availability_subject["cohort_id"], "couponReceiveRecordId": None},
+    )
+    assert response.status_code == 409
+    assert response.json()["code"] == "SERIES_NOT_ON_SALE"
+
+
+def test_post_orders_closed_live_cohort(client, db, availability_subject, samples, user_headers):
+    user = samples.user_with_student
+    close_subject_as_live_cohort(db, availability_subject)
+    response = client.post(
+        "/api/v1/orders",
+        headers=user_headers(user["user_id"]),
+        json={
+            "studentId": user["student_id"],
+            "cohortId": availability_subject["cohort_id"],
+            "couponReceiveRecordId": None,
+            "orderSourceChannelId": None,
+            "remark": "pytest closed cohort",
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["code"] == "COHORT_CLOSED"
+
+
+def test_post_orders_quote_recorded_cohort_ignores_end_date(
+    client, db, availability_subject, samples, user_headers
+):
+    user = samples.user_with_student
+    make_subject_recorded_with_past_end(db, availability_subject)
+    response = client.post(
+        "/api/v1/orders/quote",
+        headers=user_headers(user["user_id"]),
+        json={"cohortId": availability_subject["cohort_id"], "couponReceiveRecordId": None},
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["cohortId"] == availability_subject["cohort_id"]
 
 
 def test_post_orders_quote_coupon_not_applicable(client, samples, user_headers):
@@ -141,6 +225,27 @@ def test_post_order_payment_create(client, samples, user_headers):
     )
     assert response.status_code == 200
     assert response.json()["data"]["paymentId"] > 0
+
+
+def test_post_order_payment_create_closed_live_cohort(
+    client, db, availability_subject, samples, user_headers
+):
+    user = samples.user_with_student
+    order_id = create_order(
+        client,
+        user_headers,
+        user["user_id"],
+        user["student_id"],
+        availability_subject["cohort_id"],
+    )
+    close_subject_as_live_cohort(db, availability_subject)
+    response = client.post(
+        f"/api/v1/orders/{order_id}/payments",
+        headers=user_headers(user["user_id"]),
+        json={"paymentChannelCode": "wechat_pay"},
+    )
+    assert response.status_code == 409
+    assert response.json()["code"] == "COHORT_CLOSED"
 
 
 def test_get_order_payments(client, samples, user_headers):

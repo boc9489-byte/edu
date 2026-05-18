@@ -14,6 +14,7 @@ from ..dependencies import get_current_user_id
 from ..errors import bad_request, conflict, not_found, unauthorized
 from ..response import ok
 from ..utils import count_total, format_datetime, local_now, make_no, money, offset_limit
+from .cohort_availability import ensure_cohort_tradable
 
 router = APIRouter(prefix="/api/v1", tags=["payments"])
 
@@ -103,6 +104,22 @@ def ensure_order_owned(order_id: int, current_user_id: int) -> dict[str, Any]:
     return row
 
 
+def ensure_order_cohorts_tradable(order_id: int) -> None:
+    rows = fetch_all(
+        """
+        SELECT cohort.*, series.delivery_mode, series.sale_status
+        FROM order_item AS item
+        JOIN series_cohort AS cohort ON cohort.id = item.cohort_id
+        JOIN series ON series.id = cohort.series_id
+        WHERE item.order_id = %s
+        ORDER BY item.id
+        """,
+        (order_id,),
+    )
+    for row in rows:
+        ensure_cohort_tradable(row)
+
+
 def ensure_payment_owned(payment_id: int, current_user_id: int) -> dict[str, Any]:
     row = fetch_one(
         """
@@ -129,6 +146,7 @@ def create_order_payment(
     order = ensure_order_owned(order_id, current_user_id)
     if order["order_status"] != "pending":
         raise conflict("ORDER_NOT_CREATABLE_FOR_PAYMENT", "订单当前状态不允许创建支付单")
+    ensure_order_cohorts_tradable(order_id)
     payment = fetch_one(
         """
         SELECT *

@@ -18,6 +18,7 @@ from ..utils import (
     local_now,
     offset_limit,
 )
+from .cohort_availability import ensure_cohort_viewable, ensure_series_on_sale
 
 router = APIRouter(prefix="/api/v1", tags=["courses"])
 
@@ -165,6 +166,8 @@ def get_series_detail(
 def list_series_cohorts(
     series_id: Annotated[int, Path(description="课程系列 ID。")],
 ):
+    series = fetch_one("SELECT id, sale_status FROM series WHERE id = %s", (series_id,))
+    ensure_series_on_sale(series)
     rows = fetch_all(
         """
         SELECT
@@ -186,9 +189,13 @@ def list_series_cohorts(
         WHERE c.series_id = %s
           AND c.yn = 1
           AND c.current_student_count < c.max_student_count
+          AND (
+              s.delivery_mode = 'online_recorded'
+              OR (c.end_date IS NOT NULL AND c.end_date >= %s)
+          )
         ORDER BY c.start_date ASC, c.id ASC
         """,
-        (series_id,),
+        (series_id, local_now().date()),
     )
     return ok(
         [
@@ -220,16 +227,18 @@ def get_cohort_detail(
         """
         SELECT
             c.*,
+            s.delivery_mode,
+            s.sale_status,
             u.real_name AS head_teacher_name
         FROM series_cohort AS c
+        JOIN series AS s ON s.id = c.series_id
         LEFT JOIN staff_profile AS staff ON staff.id = c.head_teacher_id
         LEFT JOIN sys_user AS u ON u.id = staff.user_id
         WHERE c.id = %s
         """,
         (cohort_id,),
     )
-    if cohort is None:
-        raise not_found("COHORT_NOT_FOUND", "班次不存在")
+    cohort = ensure_cohort_viewable(cohort)
     modules = fetch_all(
         """
         SELECT id, module_name, stage_no, lesson_count
