@@ -28,7 +28,7 @@ services:
     volumes:
       - es_data:/usr/share/elasticsearch/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -s 'http://localhost:9200/_cluster/health?pretty' >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200 >/dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -80,7 +80,7 @@ services:
       MAX_CONCURRENT_REQUESTS: "16"
       MAX_BATCH_TOKENS: "16384"
     volumes:
-      - ${BGE_MODEL_PATH:-/Users/bob/Documents/BAAI/bge-large-zh-v1.5}
+      - ${BGE_MODEL_PATH:-./models/bge-large-zh-v1.5}:/models/bge-large-zh-v1.5:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:80/health >/dev/null || curl -fsS http://localhost:80 >/dev/null || exit 1"]
       interval: 30s
