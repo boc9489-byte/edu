@@ -1,6 +1,6 @@
 SET NAMES utf8mb4;
 
-CREATE TABLE ask_table_info (
+CREATE TABLE IF NOT EXISTS ask_table_info (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     table_name VARCHAR(128) NOT NULL,
     display_name VARCHAR(128) NOT NULL,
@@ -17,7 +17,7 @@ CREATE TABLE ask_table_info (
     KEY idx_ask_table_domain (domain)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '问数表级语义元数据';
 
-CREATE TABLE ask_column_info (
+CREATE TABLE IF NOT EXISTS ask_column_info (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     table_name VARCHAR(128) NOT NULL,
     column_name VARCHAR(128) NOT NULL,
@@ -35,7 +35,7 @@ CREATE TABLE ask_column_info (
     KEY idx_ask_column_table (table_name)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '问数字段级语义元数据';
 
-CREATE TABLE ask_metric_info (
+CREATE TABLE IF NOT EXISTS ask_metric_info (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     metric_code VARCHAR(128) NOT NULL,
     metric_name VARCHAR(128) NOT NULL,
@@ -53,7 +53,7 @@ CREATE TABLE ask_metric_info (
     KEY idx_ask_metric_table (main_table)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '问数指标元数据';
 
-CREATE TABLE ask_dimension_info (
+CREATE TABLE IF NOT EXISTS ask_dimension_info (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     dimension_code VARCHAR(128) NOT NULL,
     dimension_name VARCHAR(128) NOT NULL,
@@ -68,7 +68,7 @@ CREATE TABLE ask_dimension_info (
     KEY idx_ask_dimension_field (table_name, field_name)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '问数维度元数据';
 
-CREATE TABLE ask_column_metric (
+CREATE TABLE IF NOT EXISTS ask_column_metric (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     table_name VARCHAR(128) NOT NULL,
     column_name VARCHAR(128) NOT NULL,
@@ -79,7 +79,7 @@ CREATE TABLE ask_column_metric (
     KEY idx_ask_column_metric_metric (metric_code)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '问数字段指标关系';
 
-CREATE TABLE ask_table_relation (
+CREATE TABLE IF NOT EXISTS ask_table_relation (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     from_table VARCHAR(128) NOT NULL,
     from_column VARCHAR(128) NOT NULL,
@@ -95,7 +95,7 @@ CREATE TABLE ask_table_relation (
     KEY idx_ask_relation_to (to_table)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '问数表关系元数据';
 
-CREATE TABLE ask_metadata_build_log (
+CREATE TABLE IF NOT EXISTS ask_metadata_build_log (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     build_id VARCHAR(64) NOT NULL,
     target VARCHAR(32) NOT NULL,
